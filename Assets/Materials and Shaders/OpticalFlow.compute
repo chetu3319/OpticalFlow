@@ -1,0 +1,87 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+// #pragma kernel CalculateFlow
+// #pragma kernel Vizulize
+#pragma kernel ResetKernel
+#pragma kernel flowCalculation
+
+int width; 
+int height; 
+
+float Scale; 
+float Lambda; 
+float Threshold; 
+
+
+Texture2D<float4> currentTex; 
+SamplerState sampler_currentTex; 
+
+RWTexture2D<float4> previousTex; 
+
+
+RWTexture2D<float4> flowFrame;
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+float4 Random(float2 p)
+{
+    float3 a = frac(p.xyx * float3(123.32,234.43,345.65) );
+    a+= dot(a,a + 34.45); 
+    return frac(float(a.x*a.y*a.z)); 
+
+}
+[numthreads(8,8,1)]
+void ResetKernel(uint3 id : SV_DispatchThreadID)
+{
+    previousTex[id.xy] = currentTex[id.xy]; 
+    flowFrame[id.xy] = float4(1,0,0,1);
+}
+
+
+//  float4 gradient(Texture2D tex, float2 uv, float2 offset)
+//     {
+//         // return grayScale(tex2D(tex, uv + offset)) - grayScale(tex2D(tex, uv - offset));
+//         return (tex2D(tex, uv + offset)) - (tex2D(tex, uv - offset));
+//        return 0; 
+//     }
+
+[numthreads(8,8,1)]
+void flowCalculation(uint3 id:SV_DispatchThreadID)
+{
+    float4 current = currentTex[id.xy]; 
+    float4 previous = previousTex[id.xy]; 
+    
+    
+    float2 dx = float2(1.0/width, 0);
+    float2 dy = float2(0 ,1.0/height);
+
+
+    float4 diff = current -previous; 
+
+    float4 gx = previousTex[id.xy + dx] - previousTex[id.xy - dx] + currentTex[id.xy + dx] - currentTex[id.xy - dx]; 
+    float4 gy = previousTex[id.xy + dy] - previousTex[id.xy - dy] + currentTex[id.xy + dy] - currentTex[id.xy - dy]; 
+    
+   //flowFrame[id.xy] = gy+gy;//+ currentTex[id.xy + dx] - currentTex[id.xy - dx]; 
+    previousTex[id.xy] = current;
+   
+    //float4 gx = gradient(previousTex, id.xy, dx) + gradient(currentTex, id.xy, dx); 
+   // float4 gy = gradient(previousTex,id.xy,dy) + gradient(currentTex, id.xy, dy); 
+
+
+    float4 gmag = sqrt(gx*gx+gy*gy+float4(Lambda,Lambda, Lambda, Lambda)); 
+    float4 invGmag = 1.0/gmag; 
+
+    float4 vx = diff * (gx * invGmag); 
+    float4 vy = diff * (gy * invGmag); 
+    
+    float2 flow = float2(0,0); 
+    const float inv3 = 0.3333; 
+    flow.x = - (vx.x  + vx.y + vx.z) * inv3; 
+    flow.y = - (vy.x + vy.y + vy.z) * inv3; 
+
+    float w = length(flow); 
+    float nw=(w - Threshold) / (1.0 - Threshold);
+    flow = lerp(float2(0, 0), normalize(flow) * nw * Scale, step(Threshold, w));
+    flowFrame[id.xy] = float4(flow.x,0, flow.y,1); 
+
+}
